@@ -83,6 +83,55 @@ const getAllStations = async () => {
   return stations;
 };
 
+const _formatStationResponse = (stationData) => {
+  return {
+    id: stationData["data-uid"],
+    name: stationData["station-nm"],
+    subName: stationData["sub-nm"],
+  };
+};
+
+const getRelativeStations = async (stationId, lineId) => {
+  const db = getFirestore();
+  const lineStationsCollectionRef = db.collection(`lines/${lineId}/stations`);
+  const snapshot = await lineStationsCollectionRef.get();
+  const stations = [];
+  for (const doc of snapshot.docs) {
+    const station = doc.data();
+    if (station["station-nm"]) {
+      stations.push({
+        orderId: parseInt(doc.id),
+        ...station,
+      });
+    }
+  }
+  stations.sort((a, b) => a.orderId - b.orderId);
+  const currentIndex = stations.findIndex(
+    (station) => station["data-uid"] === stationId
+  );
+  const relativeStations = {
+    prev: [],
+    next: [],
+  };
+  if (currentIndex === 0) {
+    relativeStations.next = [
+      _formatStationResponse(stations[currentIndex + 1]),
+    ];
+  } else if (currentIndex === stations.length - 1) {
+    relativeStations.prev = stations
+      .slice(Math.max(currentIndex - 3, 0), currentIndex)
+      .map(_formatStationResponse);
+  } else {
+    relativeStations.prev = stations
+      .slice(Math.max(currentIndex - 3, 0), currentIndex)
+      .map(_formatStationResponse);
+    relativeStations.next = [
+      _formatStationResponse(stations[currentIndex + 1]),
+    ];
+  }
+  return relativeStations;
+};
+
 const fetchRealtimeArrivals = async (stationName) => {
   try {
     const url = `http://swopenapi.seoul.go.kr/api/subway/6a666a6b44656b6434397049484858/json/realtimeStationArrival/1/100/${stationName}`;
@@ -741,6 +790,36 @@ exports.trainSeatOccupancyStatusV2 = onRequest(
       });
     } catch (error) {
       logger.error("Error fetching seat occupancy:", error);
+      res.status(500).send({
+        status: "ERROR",
+        data: [],
+      });
+    }
+  }
+);
+
+exports.relativeStations = onRequest(
+  {
+    region: "asia-northeast3",
+    cors: true,
+  },
+  async (req, res) => {
+    try {
+      const lineId = req.query?.lineId;
+      const stationId = req.query?.stationId;
+      if (!lineId || !stationId) {
+        return res.status(400).send({
+          status: "ERROR",
+          data: [],
+        });
+      }
+      const stations = await getRelativeStations(stationId, lineId);
+      res.status(200).send({
+        status: "SUCCESS",
+        data: stations,
+      });
+    } catch (error) {
+      logger.error("Error fetching relative stations:", error);
       res.status(500).send({
         status: "ERROR",
         data: [],
